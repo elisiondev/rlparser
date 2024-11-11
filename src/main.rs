@@ -2,12 +2,12 @@ mod models;
 mod utils;
 
 use std::collections::HashMap;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, stdout, BufWriter, Write};
 use std::path::PathBuf;
 use std::fs::{self};
-use boxcars::{Attribute, CrcCheck, NetworkParse, ParseError, ParserBuilder, Replay};
+use boxcars::{Attribute, CrcCheck, NetworkParse, ParseError, ParserBuilder, Replay, RigidBody};
 use models::{Actor, ActorUpdate, Ball, Game, Player, ReplayOutput, Team};
-use utils::{get_array, get_int, get_platform, get_string};
+use utils::{get_array, get_int, get_string};
 
 fn read_file(file_path: PathBuf) -> anyhow::Result<(PathBuf, Replay)> {
     // Try to mmap the file first so we don't have to worry about potentially allocating a large
@@ -37,7 +37,7 @@ fn parse_replay(data: &[u8]) -> Result<Replay, ParseError> {
         .parse()
 }
 
-fn serialize<W: Write>(pretty: bool, writer: W, replay: &Replay) -> anyhow::Result<()> {
+fn serialize<W: Write>(pretty: bool, writer: W, replay: &ReplayOutput) -> anyhow::Result<()> {
     let res = if pretty {
         serde_json::to_writer_pretty(writer, &replay)
     } else {
@@ -47,7 +47,7 @@ fn serialize<W: Write>(pretty: bool, writer: W, replay: &Replay) -> anyhow::Resu
     res.map_err(|e| e.into())
 }
 
-fn run() -> Option<HashMap<String, Actor>>{
+fn run() -> Option<ReplayOutput>{
     let mut active_actors = HashMap::new();
     let mut actors = HashMap::new();
     let mut players:HashMap<String, String> = HashMap::new();
@@ -59,24 +59,10 @@ fn run() -> Option<HashMap<String, Actor>>{
     let Ok((_, replay)) = read_file(path) else { todo!()};
 
     let mut output = ReplayOutput {
-        team0: Team { 
-            name: "".to_string(), 
-            color: 0, 
-            score: get_int(&replay.properties, "Team0Score"), 
-            winner: false, 
-            forfeit: false 
-        },
-        team1: Team { 
-            name: "".to_string(), 
-            color: 0, 
-            score: get_int(&replay.properties, "Team1Score"), 
-            winner: false, 
-            forfeit: false 
-        },
+        team0: Team::with_score(get_int(&replay.properties, "Team0Score")),
+        team1: Team::with_score(get_int(&replay.properties, "Team1Score")),
         players: HashMap::new(),
-        ball: Ball {
-            positions: HashMap::new(),
-        },
+        ball: Ball::new(),
         game: Game {
             game_type: replay.game_type,
             match_type: get_string(&replay.properties, "MatchType"),
@@ -88,6 +74,8 @@ fn run() -> Option<HashMap<String, Actor>>{
             map_name: get_string(&replay.properties, "MapName"),
         },
     };
+
+    println!("Init output");
     
     for (i, frame) in replay.network_frames?.frames.iter().enumerate() {
         for new_actor in &frame.new_actors {
@@ -99,14 +87,17 @@ fn run() -> Option<HashMap<String, Actor>>{
                 parent: String::from(""),
                 children: Vec::new()
             };
-            if actor.object == "Archetypes.Ball.Ball_Default".to_string() {
-                balls.push(actor.name.clone());
-            }else if actor.object == "Archetypes.Teams.Team0".to_string() {
+            if actor.object.eq("Archetypes.Ball.Ball_Default") {
+                let ball_name = actor.name.clone();
+                if !balls.contains(&ball_name) {
+                    balls.push(actor.name.clone());
+                }
+            }else if actor.object.eq("Archetypes.Teams.Team0") {
                 team0 = actor.name.clone();
-            }else if actor.object == "Archetypes.Teams.Team1".to_string() {
+            }else if actor.object.eq("Archetypes.Teams.Team1") {
                 team1 = actor.name.clone();
             }
-            active_actors.insert(new_actor.actor_id, actor);
+            active_actors.insert(new_actor.actor_id.0, actor);
         }
 
         for updated_actor in &frame.updated_actors {
@@ -115,23 +106,26 @@ fn run() -> Option<HashMap<String, Actor>>{
 
             let mut parent = "".to_string();
             if let Attribute::ActiveActor(active_actor) = attribute {
-                let child = active_actors.get_mut(&updated_actor.actor_id)?.name.clone();
-                parent = active_actors.get_mut(&active_actor.actor)?.name.clone();
-                active_actors.get_mut(&active_actor.actor)?.children.push(child);
-            }
+                if(active_actor.active) {
+                    let child = active_actors.get_mut(&updated_actor.actor_id.0).unwrap().name.clone();
+
+                    //parent = active_actors.get_mut(&active_actor.actor.0).unwrap().name.clone();
+                    active_actors.get_mut(&active_actor.actor.0).unwrap().children.push(child);
+                }
+            };
 
             let updated_active_actor = active_actors
-                .get_mut(&updated_actor.actor_id)?;
+                .get_mut(&updated_actor.actor_id.0).unwrap();
             
-            if attribute_name == "Engine.PlayerReplicationInfo:PlayerName".to_string() {
+            if attribute_name.eq("Engine.PlayerReplicationInfo:PlayerName") {
                 // TODO: handle recreation of players, as in leave/rejoin
                 if let Attribute::String(player_name) = &attribute {
                     players.insert(player_name.clone(), updated_active_actor.name.clone());
-                }
+                };
             }
 
             let actor_update = ActorUpdate {
-                attribute_name: attribute_name,
+                attribute_name,
                 value: attribute
             };
 
@@ -140,49 +134,115 @@ fn run() -> Option<HashMap<String, Actor>>{
                 .get_or_insert(&mut Vec::new())
                 .push(actor_update);
 
-            if !parent.is_empty() {
+            /*if !parent.is_empty() {
                 updated_active_actor.parent = parent;
-            }
-        }
+            }*/
+        };
 
         for deleted_actor in &frame.deleted_actors {
-            let actor = active_actors.remove(deleted_actor)?;
+            let actor = active_actors.remove(&deleted_actor.0)?;
             actors.insert(actor.name.clone(), actor);
-        }
+        };
     };
+
+    for (_, left_over) in active_actors {
+        actors.insert(left_over.name.clone(), left_over);
+    }
+
+    println!("Network Frames");
+
+    for ball_name in balls {
+        if !actors.contains_key(&ball_name) {
+            println!("{} not found", ball_name.clone());
+            continue;
+        }
+        let ball_actor = actors.get(&ball_name).unwrap();
+        for (i, updates) in &ball_actor.frames {
+            for update in updates {
+                if update.attribute_name.eq("TAGame.RBActor_TA:ReplicatedRBState") {
+                    if let Attribute::RigidBody(rigid_body) = update.value {
+                        output.ball.positions.insert(*i, rigid_body);
+                    }
+                }
+            }
+        }
+    }
+
+    println!("Balls");
 
     for player_stats in get_array(&replay.properties, "PlayerStats") {
         let player_name = get_string(&player_stats, "Name");
-        let online_id = get_string(&player_stats, "OnlineID");
-        let platform = get_platform(&player_stats);
-        let player = Player {
-            name: player_name.clone(),
-            tag: if platform == "Steam".to_string() {
-                format!("{}/{}", platform, online_id)
-            } else {
-                format!("{}/{}", platform, player_name)
-            },
-            platform,
-            score: get_int(&player_stats, "Score"),
-            goals: get_int(&player_stats, "Goals"),
-            assists: get_int(&player_stats, "Assists"),
-            saves: get_int(&player_stats, "Saves"),
-            shots: get_int(&player_stats, "Shots"),
-            mvp: false,
-            full_time: false,
-            joined_late: false,
-            left_early: false,
-            camera: None,
-            loadout: None,
-            title: None,
-            positions: HashMap::new(),
-        };
+        let mut player = Player::from_stats(player_stats);
+
+        let player_actor_name = players.get(&player_name).unwrap();
+        if !actors.contains_key(player_actor_name) {
+            println!("Couldn't find player {}", player_actor_name);
+            continue;
+        }
+        let player_actor = actors.get(player_actor_name).unwrap();
+        for (_i, updates) in &player_actor.frames {
+            for update in updates {
+                if update.attribute_name.eq("TAGame.PRI_TA:ClientLoadouts") && player.loadout == None {
+                    if let Attribute::Loadout(loadout) = &update.value {
+                        player.loadout = Some(**loadout)
+                    }
+                }
+            }
+            if player.loadout != None {
+                break;
+            }
+        }
+        for child in &player_actor.children {
+            let child_actor = actors.get(child).unwrap();
+            if child_actor.object.eq("Archetypes.Car.Car_Default") {
+                for (i, child_updates) in &child_actor.frames {
+                    for child_update in child_updates {
+                        if child_update.attribute_name.eq("TAGame.RBActor_TA:ReplicatedRBState") {
+                            if let Attribute::RigidBody(rigid_body) = child_update.value {
+                                player.positions.insert(*i, rigid_body);
+                            }
+                        }
+                    }
+                }
+            } else if child_actor.object.eq("TAGame.Default__CameraSettingsActor_TA") {
+                for (_i, child_updates) in &child_actor.frames {
+                    for child_update in child_updates {
+                        if child_update.attribute_name.eq("TAGame.CameraSettingsActor_TA:ProfileSettings") && player.camera == None {
+                            if let Attribute::CamSettings(cam_settings) = &child_update.value {
+                                player.camera = Some(**cam_settings)
+                            }
+                        }
+                    }
+                    if player.camera != None {
+                        break;
+                    }
+                }
+            }
+        }
         output.players.insert(player_name.clone(), player); 
+
     }
-    return Some(actors);
+    
+    
+    //
+    println!("Finished Run");
+    Some(output)
 }
 
 fn main(){
-    run();
+    use std::time::Instant;
+    let now = Instant::now();
+    match run() {
+        Some(replay) => {
+            let stdout = io::stdout();
+            let lock = stdout.lock();
+            let _ = serialize(true, BufWriter::new(lock), &replay);
+        }
+        None => {
+            println!("Failed");
+        }
+    }
     //serde_json.run();
+    let elapsed = now.elapsed();
+    println!("Elapsed: {:.2?}", elapsed);
 }

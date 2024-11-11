@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
-use boxcars::{ActorId, Attribute, RigidBody};
+use boxcars::{ActorId, Attribute, CamSettings, HeaderProp, Loadout, RigidBody};
 use serde::Serialize;
 
-#[derive(Serialize, Debug)]
+use crate::utils::{get_int, get_int64, get_platform, get_string};
+
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct ReplayOutput {
     pub team0: Team,
     pub team1: Team,
@@ -12,16 +14,28 @@ pub struct ReplayOutput {
     pub game: Game
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct Team {
-    pub name: String,
-    pub color: i32,
-    pub score: i32,
-    pub winner: bool,
-    pub forfeit: bool
+    pub name: Option<String>,
+    pub color: Option<i32>,
+    pub score: Option<i32>,
+    pub winner: Option<bool>,
+    pub forfeit: Option<bool>
 }
 
-#[derive(Serialize, Debug)]
+impl Team {
+    pub fn with_score(score: i32) -> Team {
+        Team {
+            name: None,
+            color: None,
+            score: Some(score),
+            winner: None,
+            forfeit: None
+        }
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct Player {
     pub name: String,
     pub tag: String,
@@ -35,43 +49,54 @@ pub struct Player {
     pub full_time: bool,
     pub joined_late: bool,
     pub left_early: bool,
-    pub camera: Option<CameraSettings>,
-    pub loadout: Option<ClientLoadout>,
-    pub title: Option<String>,
+    pub camera: Option<CamSettings>,
+    pub loadout: Option<Loadout>,
     pub positions: HashMap<usize, RigidBody>
 }
 
-#[derive(Serialize, Debug)]
-pub struct CameraSettings {
-    pub fov: f32,
-    pub height: f32,
-    pub angle: f32,
-    pub distance: f32,
-    pub stiffness: f32,
-    pub swivel: f32,
-    pub transition: f32
+impl Player {
+    pub fn from_stats(stats: Vec<(String, HeaderProp)>) -> Player {
+        let player_name = get_string(&stats, "Name");
+        let platform = get_platform(&stats);
+        let online_id = get_int64(&stats, "OnlineID");
+        Player {
+            name: player_name.clone(),
+            tag: if platform.eq("Steam") {
+                format!("{}/{}", platform, online_id)
+            } else {
+                format!("{}/{}", platform, player_name)
+            },
+            platform,
+            score: get_int(&stats, "Score"),
+            goals: get_int(&stats, "Goals"),
+            assists: get_int(&stats, "Assists"),
+            saves: get_int(&stats, "Saves"),
+            shots: get_int(&stats, "Shots"),
+            positions: HashMap::new(),
+            mvp: false,
+            full_time: true,
+            joined_late: false,
+            left_early: false,
+            camera: None,
+            loadout: None,
+        }
+    }
 }
 
-#[derive(Serialize, Debug)]
-pub struct ClientLoadout {
-    pub version: u32,
-    pub body: u32,
-    pub decal: u32,
-    pub wheels: u32,
-    pub rocket_trail: u32,
-    pub antenna: u32,
-    pub topper: u32,
-    pub engine: u32,
-    pub goal_explosion: u32,
-    pub banner: u32,
-}
-
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct Ball {
     pub positions: HashMap<usize, RigidBody>
 }
 
-#[derive(Serialize, Debug)]
+impl Ball {
+    pub fn new() -> Ball {
+        Ball {
+            positions: HashMap::new()
+        }
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct Game {
     pub game_type: String,
     pub match_type: String,
