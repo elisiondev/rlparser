@@ -3,8 +3,8 @@ mod utils;
 
 use std::collections::HashMap;
 use std::io::{self, stdout, BufWriter, Write};
-use std::path::PathBuf;
-use std::fs::{self};
+use std::path::{Path, PathBuf};
+use std::fs::{self, File};
 use boxcars::{Attribute, CrcCheck, NetworkParse, ParseError, ParserBuilder, Replay, RigidBody};
 use models::{Actor, ActorUpdate, Ball, Game, Player, ReplayOutput, Team};
 use utils::{get_array, get_int, get_string};
@@ -55,7 +55,7 @@ fn run() -> Option<ReplayOutput>{
     let mut team0 = "".to_string();
     let mut team1 = "".to_string();
 
-    let path = PathBuf::from("C:/Users/parml/replay/rlparser/data/test3.replay");
+    let path = PathBuf::from("data/test3.replay");
     let Ok((_, replay)) = read_file(path) else { todo!()};
 
     let mut output = ReplayOutput {
@@ -74,8 +74,6 @@ fn run() -> Option<ReplayOutput>{
             map_name: get_string(&replay.properties, "MapName"),
         },
     };
-
-    println!("Init output");
     
     for (i, frame) in replay.network_frames?.frames.iter().enumerate() {
         for new_actor in &frame.new_actors {
@@ -88,8 +86,7 @@ fn run() -> Option<ReplayOutput>{
                 children: Vec::new()
             };
             if actor.object.eq("Archetypes.Ball.Ball_Default") {
-                let ball_name = actor.name.clone();
-                if !balls.contains(&ball_name) {
+                if !balls.contains(&actor.name) {
                     balls.push(actor.name.clone());
                 }
             }else if actor.object.eq("Archetypes.Teams.Team0") {
@@ -104,12 +101,9 @@ fn run() -> Option<ReplayOutput>{
             let attribute = updated_actor.attribute.clone();
             let attribute_name = replay.objects[updated_actor.object_id.0 as usize].clone();
 
-            let mut parent = "".to_string();
             if let Attribute::ActiveActor(active_actor) = attribute {
-                if(active_actor.active) {
+                if active_actor.active {
                     let child = active_actors.get_mut(&updated_actor.actor_id.0).unwrap().name.clone();
-
-                    //parent = active_actors.get_mut(&active_actor.actor.0).unwrap().name.clone();
                     active_actors.get_mut(&active_actor.actor.0).unwrap().children.push(child);
                 }
             };
@@ -129,14 +123,11 @@ fn run() -> Option<ReplayOutput>{
                 value: attribute
             };
 
-            updated_active_actor
-                .frames.get_mut(&i)
-                .get_or_insert(&mut Vec::new())
-                .push(actor_update);
+            if !updated_active_actor.frames.contains_key(&i) {
+                updated_active_actor.frames.insert(i, Vec::new());
+            }
 
-            /*if !parent.is_empty() {
-                updated_active_actor.parent = parent;
-            }*/
+            updated_active_actor.frames.get_mut(&i).unwrap().push(actor_update);
         };
 
         for deleted_actor in &frame.deleted_actors {
@@ -149,14 +140,12 @@ fn run() -> Option<ReplayOutput>{
         actors.insert(left_over.name.clone(), left_over);
     }
 
-    println!("Network Frames");
-
     for ball_name in balls {
         if !actors.contains_key(&ball_name) {
             println!("{} not found", ball_name.clone());
             continue;
         }
-        let ball_actor = actors.get(&ball_name).unwrap();
+        let ball_actor = actors.remove(&ball_name).unwrap();
         for (i, updates) in &ball_actor.frames {
             for update in updates {
                 if update.attribute_name.eq("TAGame.RBActor_TA:ReplicatedRBState") {
@@ -167,8 +156,6 @@ fn run() -> Option<ReplayOutput>{
             }
         }
     }
-
-    println!("Balls");
 
     for player_stats in get_array(&replay.properties, "PlayerStats") {
         let player_name = get_string(&player_stats, "Name");
@@ -183,7 +170,7 @@ fn run() -> Option<ReplayOutput>{
         for (_i, updates) in &player_actor.frames {
             for update in updates {
                 if update.attribute_name.eq("TAGame.PRI_TA:ClientLoadouts") && player.loadout == None {
-                    if let Attribute::Loadout(loadout) = &update.value {
+                    if let Attribute::TeamLoadout(loadout) = &update.value {
                         player.loadout = Some(**loadout)
                     }
                 }
@@ -222,10 +209,6 @@ fn run() -> Option<ReplayOutput>{
         output.players.insert(player_name.clone(), player); 
 
     }
-    
-    
-    //
-    println!("Finished Run");
     Some(output)
 }
 
@@ -234,15 +217,16 @@ fn main(){
     let now = Instant::now();
     match run() {
         Some(replay) => {
-            let stdout = io::stdout();
-            let lock = stdout.lock();
-            let _ = serialize(true, BufWriter::new(lock), &replay);
+
+            //let stdout = io::stdout();
+            //let lock = stdout.lock();
+            let file = File::create(Path::new("out/replay3.json")).expect("Unable -to open file");
+            let _ = serialize(true, BufWriter::new(file), &replay);
         }
         None => {
             println!("Failed");
         }
     }
-    //serde_json.run();
     let elapsed = now.elapsed();
     println!("Elapsed: {:.2?}", elapsed);
 }

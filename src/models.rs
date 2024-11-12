@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use boxcars::{ActorId, Attribute, CamSettings, HeaderProp, Loadout, RigidBody};
+use boxcars::{ActorId, Attribute, CamSettings, HeaderProp, TeamLoadout, RigidBody};
 use serde::Serialize;
 
 use crate::utils::{get_int, get_int64, get_platform, get_string};
@@ -50,7 +50,7 @@ pub struct Player {
     pub joined_late: bool,
     pub left_early: bool,
     pub camera: Option<CamSettings>,
-    pub loadout: Option<Loadout>,
+    pub loadout: Option<TeamLoadout>,
     pub positions: HashMap<usize, RigidBody>
 }
 
