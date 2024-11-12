@@ -8,8 +8,8 @@ Typically an analyzer will use a higher level language like java, python, or typ
 # Precursor
 1. All ball actors are considered "the ball"
 2. A player assumes ownership of all:
- - car actors
- - car components actors
- - camera setting actors.(_treated as a single set currently, even though technically could be updated mid match_)
+  - car actors
+  - car components actors
+  - camera setting actors.(_treated as a single set currently, even though technically could be updated mid match_)
 3. Teams are treated as independent of players
 4. Header is reduced to match specific information (Highlights may or may not make their way in)
