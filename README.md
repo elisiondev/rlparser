@@ -7,16 +7,16 @@ Typically an analyzer will use a higher level language like java, python, or typ
 
 ## Precursor
 1. All ball actors are considered "the ball"
-2. A player's car actors, car component actors, and camera setting actor<sup>[1]</sup> are flattened to that player.
+2. A player's car actors, car component actors, and camera setting actor[^1] are flattened to that player.
 3. Teams are treated as independent of players
-4. Header is reduced to match specific information<sup>[2]
+4. Header is reduced to match specific information[^2]
 
-<sup>[1]</sup>_camera settings are currently treated as a single set, even though technically could be updated mid match_
+[^1]: _camera settings are currently treated as a single set, even though technically could be updated mid match_
 
-<sup>[2]</sup>_Highlights may or may not make their way in_
+[^2]: _Highlights may or may not make their way in_
 
 ## Schema
-```json
+```python
 Replay {
   "team0": "Team",
   "team1": "Team",
