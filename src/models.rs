@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use boxcars::{ActorId, Attribute, CamSettings, HeaderProp, TeamLoadout, RigidBody};
+use boxcars::{ActorId, Attribute, CamSettings, HeaderProp, Replay, RigidBody, TeamLoadout};
 use serde::Serialize;
 
 use crate::utils::{get_int, get_int64, get_platform, get_string};
@@ -12,6 +12,27 @@ pub struct ReplayOutput {
     pub players: HashMap<String, Player>,
     pub ball: Ball,
     pub game: Game
+}
+
+impl ReplayOutput {
+    pub fn from(replay: &Replay) -> ReplayOutput {
+        ReplayOutput {
+            team0: Team::with_score(get_int(&replay.properties, "Team0Score")),
+            team1: Team::with_score(get_int(&replay.properties, "Team1Score")),
+            players: HashMap::new(),
+            ball: Ball::new(),
+            game: Game {
+                game_type: replay.game_type.clone(),
+                match_type: get_string(&replay.properties, "MatchType"),
+                team_size: get_int(&replay.properties, "TeamSize"),
+                had_bots: false,
+                no_contest: false,
+                date: get_string(&replay.properties, "Date"),
+                id: get_string(&replay.properties, "Id"),
+                map_name: get_string(&replay.properties, "MapName"),
+            }
+        }
+    }
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
@@ -114,8 +135,8 @@ pub struct Actor {
     pub name: String,
     pub object: String,
     pub frames: HashMap<usize, Vec<ActorUpdate>>,
-    pub parent: String,
-    pub children: Vec<String>
+    pub player: Option<String>,
+    pub parent: Option<i32>
 }
 
 #[derive(Serialize, Debug)]

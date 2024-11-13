@@ -2,12 +2,13 @@ mod models;
 mod utils;
 
 use std::collections::HashMap;
+use std::fmt;
 use std::io::{self, stdout, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::fs::{self, File};
 use boxcars::{Attribute, CrcCheck, NetworkParse, ParseError, ParserBuilder, Replay, RigidBody};
 use models::{Actor, ActorUpdate, Ball, Game, Player, ReplayOutput, Team};
-use utils::{get_array, get_int, get_string};
+use utils::{get_actor_type, get_array, get_int, get_string, lookup_object, set_parent, set_player};
 
 fn read_file(file_path: PathBuf) -> anyhow::Result<(PathBuf, Replay)> {
     // Try to mmap the file first so we don't have to worry about potentially allocating a large
@@ -47,33 +48,18 @@ fn serialize<W: Write>(pretty: bool, writer: W, replay: &ReplayOutput) -> anyhow
     res.map_err(|e| e.into())
 }
 
-fn run() -> Option<ReplayOutput>{
+fn run(file_name: &str) -> Option<ReplayOutput>{
     let mut active_actors = HashMap::new();
     let mut actors = HashMap::new();
-    let mut players:HashMap<String, String> = HashMap::new();
-    let mut balls = Vec::new();
-    let mut team0 = "".to_string();
-    let mut team1 = "".to_string();
+    //let mut players:HashMap<String, String> = HashMap::new();
+    //let mut balls = Vec::new();
+    //let mut team0 = String::new();
+    //let mut team1 = String::new();
 
-    let path = PathBuf::from("data/test3.replay");
+    let path = PathBuf::from(format!("data/{file_name}.replay"));
     let Ok((_, replay)) = read_file(path) else { todo!()};
 
-    let mut output = ReplayOutput {
-        team0: Team::with_score(get_int(&replay.properties, "Team0Score")),
-        team1: Team::with_score(get_int(&replay.properties, "Team1Score")),
-        players: HashMap::new(),
-        ball: Ball::new(),
-        game: Game {
-            game_type: replay.game_type,
-            match_type: get_string(&replay.properties, "MatchType"),
-            team_size: get_int(&replay.properties, "TeamSize"),
-            had_bots: false,
-            no_contest: false,
-            date: get_string(&replay.properties, "Date"),
-            id: get_string(&replay.properties, "Id"),
-            map_name: get_string(&replay.properties, "MapName"),
-        },
-    };
+    let mut output = ReplayOutput::from(&replay);
     
     for (i, frame) in replay.network_frames?.frames.iter().enumerate() {
         for new_actor in &frame.new_actors {
@@ -82,10 +68,10 @@ fn run() -> Option<ReplayOutput>{
                 name: replay.names[new_actor.name_id? as usize].clone(),
                 object: replay.objects[new_actor.object_id.0 as usize].clone(),
                 frames: HashMap::new(),
-                parent: String::from(""),
-                children: Vec::new()
+                player: None,
+                parent: None
             };
-            if actor.object.eq("Archetypes.Ball.Ball_Default") {
+            /*if actor.object.eq("Archetypes.Ball.Ball_Default") {
                 if !balls.contains(&actor.name) {
                     balls.push(actor.name.clone());
                 }
@@ -93,33 +79,43 @@ fn run() -> Option<ReplayOutput>{
                 team0 = actor.name.clone();
             }else if actor.object.eq("Archetypes.Teams.Team1") {
                 team1 = actor.name.clone();
-            }
+            }*/
             active_actors.insert(new_actor.actor_id.0, actor);
         }
 
         for updated_actor in &frame.updated_actors {
-            let attribute = updated_actor.attribute.clone();
-            let attribute_name = replay.objects[updated_actor.object_id.0 as usize].clone();
+            let attribute = updated_actor.attribute;
+            let attribute_name = lookup_object(&replay, updated_actor.object_id);
+            let updated_actor_id = updated_actor.actor_id.0;
 
-            if let Attribute::ActiveActor(active_actor) = attribute {
-                if active_actor.active {
-                    let child = active_actors.get_mut(&updated_actor.actor_id.0).unwrap().name.clone();
-                    active_actors.get_mut(&active_actor.actor.0).unwrap().children.push(child);
+            let updated_active_actor_type = get_actor_type(&active_actors, updated_actor_id);
+
+            match attribute_name.as_str() {
+                // component to car
+                "TAGame.CarComponent_TA:Vehicle" | 
+                // car to player
+                "Engine.Pawn:PlayerReplicationInfo" |
+                // camera to player
+                "TAGame.CameraSettingsActor_TA:PRI" => {
+                    if let Attribute::ActiveActor(active_actor) = &attribute {
+                        if active_actor.active {
+                            set_parent(&mut active_actors, updated_actor_id, active_actor.actor.0);
+                        }
+                    };
                 }
-            };
-
-            let updated_active_actor = active_actors
-                .get_mut(&updated_actor.actor_id.0).unwrap();
-            
-            if attribute_name.eq("Engine.PlayerReplicationInfo:PlayerName") {
-                // TODO: handle recreation of players, as in leave/rejoin
-                if let Attribute::String(player_name) = &attribute {
-                    players.insert(player_name.clone(), updated_active_actor.name.clone());
-                };
+                // until this we don't know who a player actor actually is
+                "Engine.PlayerReplicationInfo:PlayerName" => {
+                    // TODO: handle recreation of players, as in leave/rejoin
+                    if let Attribute::String(player_name) = &attribute {
+                        set_player(&mut active_actors, updated_actor_id, player_name.clone());
+                        //updated_active_actor.player = Some(player_name.clone());
+                        //players.insert(player_name.clone(), updated_active_actor.name.clone());
+                    };
+                }
             }
 
             let actor_update = ActorUpdate {
-                attribute_name,
+                attribute_name: attribute_name.clone(),
                 value: attribute
             };
 
@@ -215,12 +211,13 @@ fn run() -> Option<ReplayOutput>{
 fn main(){
     use std::time::Instant;
     let now = Instant::now();
-    match run() {
+    let file_name = "test5";
+    match run(file_name) {
         Some(replay) => {
 
             //let stdout = io::stdout();
             //let lock = stdout.lock();
-            let file = File::create(Path::new("out/replay3.json")).expect("Unable -to open file");
+            let file = File::create(Path::new(&format!("out/{file_name}.json"))).expect("Unable -to open file");
             let _ = serialize(true, BufWriter::new(file), &replay);
         }
         None => {

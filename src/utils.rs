@@ -1,4 +1,8 @@
-use boxcars::HeaderProp;
+use std::collections::HashMap;
+
+use boxcars::{HeaderProp, ObjectId, Replay};
+
+use crate::models::Actor;
 
 pub fn get_header_value(properties: &Vec<(String, HeaderProp)>, key: &str) -> Option<HeaderProp> {
     for (prop_name, prop_value) in properties {
@@ -70,4 +74,34 @@ pub fn get_platform(properties: &Vec<(String, HeaderProp)>) -> String {
     get_byte(properties, "Platform")
         .unwrap_or("Unknown".to_string())
         .replace("OnlinePlatform_","")
+}
+
+pub fn get_actor(actors: &HashMap<i32, Actor>, id: i32) -> &Actor {
+    match actors.get(&id) {
+        Some(actor) => actor,
+        None => panic!("Could not find actor {}", id)
+    }
+}
+
+pub fn get_actor_mut(actors: &mut HashMap<i32, Actor>, id: i32) -> &mut Actor {
+    match actors.get_mut(&id) {
+        Some(actor) => actor,
+        None => panic!("Could not find actor {}", id)
+    }
+}
+
+pub fn get_actor_type(actors: &HashMap<i32, Actor>, id: i32) -> String {
+    get_actor(actors, id).object.clone()
+}
+
+pub fn lookup_object(replay: &Replay, id: ObjectId) -> &String {
+    &replay.objects[id.0 as usize]
+}
+
+pub fn set_parent(actors: &mut HashMap<i32, Actor>, id: i32, parent: i32) {
+    get_actor_mut(actors, id).parent = Some(parent)
+}
+
+pub fn set_player(actors: &mut HashMap<i32, Actor>, id: i32, player: String) {
+    get_actor_mut(actors, id).player = Some(player)
 }
