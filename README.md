@@ -48,7 +48,7 @@ Player {
   "full_time": "bool",
   "joined_late": "bool",
   "left_early": "bool",
-  "camera": "CameraSettings",
+  "camera": "CamSettings",
   "loadout": "TeamLoadout",
   "positions": {["frame"]:"RigidBody"}
 }
@@ -68,3 +68,6 @@ Game {
   "no_contest": "bool"
 }
 ```
+> [RigidBody](https://docs.rs/boxcars/latest/boxcars/attributes/struct.RigidBody.html), 
+  [TeamLoadout](https://docs.rs/boxcars/latest/boxcars/attributes/struct.TeamLoadout.html), 
+  [CamSettings](https://docs.rs/boxcars/latest/boxcars/attributes/struct.CamSettings.html)
