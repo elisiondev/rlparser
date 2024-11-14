@@ -2,13 +2,12 @@ mod models;
 mod utils;
 
 use std::collections::HashMap;
-use std::fmt;
-use std::io::{self, stdout, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::fs::{self, File};
-use boxcars::{Attribute, CrcCheck, NetworkParse, ParseError, ParserBuilder, Replay, RigidBody};
-use models::{Actor, ActorUpdate, Ball, Game, Player, ReplayOutput, Team};
-use utils::{get_actor_type, get_array, get_int, get_string, lookup_object, set_parent, set_player};
+use boxcars::{Attribute, CrcCheck, NetworkParse, ParseError, ParserBuilder, Replay};
+use models::{Actor, ReplayOutput};
+use utils::{add_ball_position, add_player_position, get_actor_player, get_actor_type, lookup_object, set_parent, set_player};
 
 fn read_file(file_path: PathBuf) -> anyhow::Result<(PathBuf, Replay)> {
     // Try to mmap the file first so we don't have to worry about potentially allocating a large
@@ -50,18 +49,13 @@ fn serialize<W: Write>(pretty: bool, writer: W, replay: &ReplayOutput) -> anyhow
 
 fn run(file_name: &str) -> Option<ReplayOutput>{
     let mut active_actors = HashMap::new();
-    let mut actors = HashMap::new();
-    //let mut players:HashMap<String, String> = HashMap::new();
-    //let mut balls = Vec::new();
-    //let mut team0 = String::new();
-    //let mut team1 = String::new();
 
     let path = PathBuf::from(format!("data/{file_name}.replay"));
     let Ok((_, replay)) = read_file(path) else { todo!()};
 
     let mut output = ReplayOutput::from(&replay);
     
-    for (i, frame) in replay.network_frames?.frames.iter().enumerate() {
+    for (i, frame) in replay.clone().network_frames?.frames.iter().enumerate() {
         for new_actor in &frame.new_actors {
             let actor = Actor {
                 id: new_actor.actor_id,
@@ -69,22 +63,14 @@ fn run(file_name: &str) -> Option<ReplayOutput>{
                 object: replay.objects[new_actor.object_id.0 as usize].clone(),
                 frames: HashMap::new(),
                 player: None,
-                parent: None
+                parent: None,
+                children: Vec::new()
             };
-            /*if actor.object.eq("Archetypes.Ball.Ball_Default") {
-                if !balls.contains(&actor.name) {
-                    balls.push(actor.name.clone());
-                }
-            }else if actor.object.eq("Archetypes.Teams.Team0") {
-                team0 = actor.name.clone();
-            }else if actor.object.eq("Archetypes.Teams.Team1") {
-                team1 = actor.name.clone();
-            }*/
             active_actors.insert(new_actor.actor_id.0, actor);
         }
 
         for updated_actor in &frame.updated_actors {
-            let attribute = updated_actor.attribute;
+            let attribute = &updated_actor.attribute;
             let attribute_name = lookup_object(&replay, updated_actor.object_id);
             let updated_actor_id = updated_actor.actor_id.0;
 
@@ -105,113 +91,53 @@ fn run(file_name: &str) -> Option<ReplayOutput>{
                 }
                 // until this we don't know who a player actor actually is
                 "Engine.PlayerReplicationInfo:PlayerName" => {
-                    // TODO: handle recreation of players, as in leave/rejoin
                     if let Attribute::String(player_name) = &attribute {
                         set_player(&mut active_actors, updated_actor_id, player_name.clone());
-                        //updated_active_actor.player = Some(player_name.clone());
-                        //players.insert(player_name.clone(), updated_active_actor.name.clone());
                     };
                 }
+                // TODO: Camera not working now, player is none on transmit
+                "TAGame.CameraSettingsActor_TA:ProfileSettings" => {
+                    let updated_actor_player = get_actor_player(&active_actors, updated_actor_id);
+                    if !output.players.contains_key(&updated_actor_player) { continue; }
+
+                    if let Attribute::CamSettings(cam_settings) = &attribute {
+                        output.players.get_mut(&updated_actor_player).unwrap().camera = Some(**cam_settings);
+                    };
+                }
+                "TAGame.RBActor_TA:ReplicatedRBState" => {
+                    if let Attribute::RigidBody(rigid_body) = &attribute {
+                        if updated_active_actor_type.eq("Archetypes.Ball.Ball_Default") {
+                            add_ball_position(&mut output, i, *rigid_body);
+                        }
+                        else if updated_active_actor_type.eq("Archetypes.Car.Car_Default") {
+                            let updated_actor_player = get_actor_player(&active_actors, updated_actor_id);
+                            if output.players.contains_key(&updated_actor_player) {
+                                add_player_position(&mut output, &updated_actor_player, i, *rigid_body);
+                            }
+                        }
+                    }
+                }
+                "TAGame.Team_TA:CustomTeamName" => {
+                    if let Attribute::String(name) = attribute{
+                        if updated_active_actor_type.eq("Archetypes.Teams.Team0") {
+                            output.team0.name = Some(name.clone());
+                        }else{
+                            output.team1.name = Some(name.clone());
+                        }
+                    }
+                }
+                _ => {}
             }
-
-            let actor_update = ActorUpdate {
-                attribute_name: attribute_name.clone(),
-                value: attribute
-            };
-
-            if !updated_active_actor.frames.contains_key(&i) {
-                updated_active_actor.frames.insert(i, Vec::new());
-            }
-
-            updated_active_actor.frames.get_mut(&i).unwrap().push(actor_update);
-        };
-
-        for deleted_actor in &frame.deleted_actors {
-            let actor = active_actors.remove(&deleted_actor.0)?;
-            actors.insert(actor.name.clone(), actor);
         };
     };
 
-    for (_, left_over) in active_actors {
-        actors.insert(left_over.name.clone(), left_over);
-    }
-
-    for ball_name in balls {
-        if !actors.contains_key(&ball_name) {
-            println!("{} not found", ball_name.clone());
-            continue;
-        }
-        let ball_actor = actors.remove(&ball_name).unwrap();
-        for (i, updates) in &ball_actor.frames {
-            for update in updates {
-                if update.attribute_name.eq("TAGame.RBActor_TA:ReplicatedRBState") {
-                    if let Attribute::RigidBody(rigid_body) = update.value {
-                        output.ball.positions.insert(*i, rigid_body);
-                    }
-                }
-            }
-        }
-    }
-
-    for player_stats in get_array(&replay.properties, "PlayerStats") {
-        let player_name = get_string(&player_stats, "Name");
-        let mut player = Player::from_stats(player_stats);
-
-        let player_actor_name = players.get(&player_name).unwrap();
-        if !actors.contains_key(player_actor_name) {
-            println!("Couldn't find player {}", player_actor_name);
-            continue;
-        }
-        let player_actor = actors.get(player_actor_name).unwrap();
-        for (_i, updates) in &player_actor.frames {
-            for update in updates {
-                if update.attribute_name.eq("TAGame.PRI_TA:ClientLoadouts") && player.loadout == None {
-                    if let Attribute::TeamLoadout(loadout) = &update.value {
-                        player.loadout = Some(**loadout)
-                    }
-                }
-            }
-            if player.loadout != None {
-                break;
-            }
-        }
-        for child in &player_actor.children {
-            let child_actor = actors.get(child).unwrap();
-            if child_actor.object.eq("Archetypes.Car.Car_Default") {
-                for (i, child_updates) in &child_actor.frames {
-                    for child_update in child_updates {
-                        if child_update.attribute_name.eq("TAGame.RBActor_TA:ReplicatedRBState") {
-                            if let Attribute::RigidBody(rigid_body) = child_update.value {
-                                player.positions.insert(*i, rigid_body);
-                            }
-                        }
-                    }
-                }
-            } else if child_actor.object.eq("TAGame.Default__CameraSettingsActor_TA") {
-                for (_i, child_updates) in &child_actor.frames {
-                    for child_update in child_updates {
-                        if child_update.attribute_name.eq("TAGame.CameraSettingsActor_TA:ProfileSettings") && player.camera == None {
-                            if let Attribute::CamSettings(cam_settings) = &child_update.value {
-                                player.camera = Some(**cam_settings)
-                            }
-                        }
-                    }
-                    if player.camera != None {
-                        break;
-                    }
-                }
-            }
-        }
-        output.players.insert(player_name.clone(), player); 
-
-    }
     Some(output)
 }
 
 fn main(){
     use std::time::Instant;
     let now = Instant::now();
-    let file_name = "test5";
+    let file_name = "test3";
     match run(file_name) {
         Some(replay) => {
 

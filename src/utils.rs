@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use boxcars::{HeaderProp, ObjectId, Replay};
+use boxcars::{HeaderProp, ObjectId, Replay, RigidBody};
 
-use crate::models::Actor;
+use crate::models::{Actor, ReplayOutput};
 
 pub fn get_header_value(properties: &Vec<(String, HeaderProp)>, key: &str) -> Option<HeaderProp> {
     for (prop_name, prop_value) in properties {
@@ -94,14 +94,38 @@ pub fn get_actor_type(actors: &HashMap<i32, Actor>, id: i32) -> String {
     get_actor(actors, id).object.clone()
 }
 
+pub fn get_actor_player(actors: &HashMap<i32, Actor>, id: i32) -> String {
+    match &get_actor(actors, id).player {
+        Some(player) => player.clone(),
+        None => String::from("None")
+    }
+}
+
 pub fn lookup_object(replay: &Replay, id: ObjectId) -> &String {
     &replay.objects[id.0 as usize]
 }
 
 pub fn set_parent(actors: &mut HashMap<i32, Actor>, id: i32, parent: i32) {
-    get_actor_mut(actors, id).parent = Some(parent)
+    get_actor_mut(actors, id).parent = Some(parent);
+    get_actor_mut(actors, id).player = get_actor(actors, parent).player.clone();
+    get_actor_mut(actors, parent).children.push(id);
 }
 
 pub fn set_player(actors: &mut HashMap<i32, Actor>, id: i32, player: String) {
-    get_actor_mut(actors, id).player = Some(player)
+    get_actor_mut(actors, id).player = Some(player.clone());
+    for child in get_actor_mut(actors, id).children.to_owned() {
+        //get_actor_mut(actors, id).children.remove(i);
+        get_actor_mut(actors, child).player = Some(player.clone());
+    }
+}
+
+pub fn add_ball_position(output: &mut ReplayOutput, frame: usize, rigid_body: RigidBody) {
+    output.ball.positions.insert(frame, rigid_body);
+}
+
+pub fn add_player_position(output: &mut ReplayOutput, player_name: &String, frame: usize, rigid_body: RigidBody) {
+    match output.players.get_mut(player_name) {
+        Some(player) => player.positions.insert(frame, rigid_body),
+        None => panic!("Player on field that doesn't belong {}", player_name)
+    };
 }

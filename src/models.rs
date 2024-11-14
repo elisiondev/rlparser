@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use boxcars::{ActorId, Attribute, CamSettings, HeaderProp, Replay, RigidBody, TeamLoadout};
 use serde::Serialize;
 
-use crate::utils::{get_int, get_int64, get_platform, get_string};
+use crate::utils::{get_array, get_int, get_int64, get_platform, get_string};
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct ReplayOutput {
@@ -16,7 +16,7 @@ pub struct ReplayOutput {
 
 impl ReplayOutput {
     pub fn from(replay: &Replay) -> ReplayOutput {
-        ReplayOutput {
+        let mut out = ReplayOutput {
             team0: Team::with_score(get_int(&replay.properties, "Team0Score")),
             team1: Team::with_score(get_int(&replay.properties, "Team1Score")),
             players: HashMap::new(),
@@ -31,7 +31,12 @@ impl ReplayOutput {
                 id: get_string(&replay.properties, "Id"),
                 map_name: get_string(&replay.properties, "MapName"),
             }
+        };
+        for stat in get_array(&replay.properties, "PlayerStats") {
+            let player = Player::from_stats(stat);
+            out.players.insert(player.name.clone(), player);
         }
+        out
     }
 }
 
@@ -136,7 +141,8 @@ pub struct Actor {
     pub object: String,
     pub frames: HashMap<usize, Vec<ActorUpdate>>,
     pub player: Option<String>,
-    pub parent: Option<i32>
+    pub parent: Option<i32>,
+    pub children: Vec<i32>
 }
 
 #[derive(Serialize, Debug)]
