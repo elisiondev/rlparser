@@ -107,7 +107,12 @@ pub fn lookup_object(replay: &Replay, id: ObjectId) -> &String {
 
 pub fn set_parent(actors: &mut HashMap<i32, Actor>, id: i32, parent: i32) {
     get_actor_mut(actors, id).parent = Some(parent);
-    get_actor_mut(actors, id).player = get_actor(actors, parent).player.clone();
+    //get_actor_mut(actors, id).player = get_actor(actors, parent).player.clone();
+    // attempt to skip child loop if we already know player
+    if get_actor(actors, parent).player != None {
+        get_actor_mut(actors, id).player = get_actor(actors, parent).player.clone();
+        return;
+    }
     if get_actor(actors, parent).children.contains(&id) {return;}
     get_actor_mut(actors, parent).children.push(id);
 }
