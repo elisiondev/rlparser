@@ -106,6 +106,8 @@ pub fn lookup_object(replay: &Replay, id: ObjectId) -> &String {
 }
 
 pub fn set_parent(actors: &mut HashMap<i32, Actor>, id: i32, parent: i32) {
+    // if we already know player we've exhausted need for relationship
+    if get_actor(actors, id).player != None { return; }
     get_actor_mut(actors, id).parent = Some(parent);
     //get_actor_mut(actors, id).player = get_actor(actors, parent).player.clone();
     // attempt to skip child loop if we already know player
@@ -119,7 +121,7 @@ pub fn set_parent(actors: &mut HashMap<i32, Actor>, id: i32, parent: i32) {
 
 pub fn set_player(actors: &mut HashMap<i32, Actor>, id: i32, player: String) {
     get_actor_mut(actors, id).player = Some(player.clone());
-    for child in get_actor_mut(actors, id).children.to_owned() {
+    for child in get_actor(actors, id).children {
         //get_actor_mut(actors, id).children.remove(i);
         get_actor_mut(actors, child).player = Some(player.clone());
     }
